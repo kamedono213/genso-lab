@@ -58,24 +58,29 @@ const FX = (() => {
 
 // ---------- 記録(この端末に保存)
 const SAVE_KEY = 'genso-lab-save';
-let S = { coins: 60, el: {}, cp: {}, wins: 0, games: 0, name: '', hints: true, lv: 0, miss: {}, quizBest: {} };
+const S_DEF = { coins: 60, el: {}, cp: {}, wins: 0, games: 0, name: '', hints: true, lv: 0, miss: {}, quizBest: {}, st: {}, ach: {} };
+let S = JSON.parse(JSON.stringify(S_DEF));
 try { Object.assign(S, JSON.parse(localStorage.getItem(SAVE_KEY) || '{}')); } catch (e) { /* 保存がなくても遊べる */ }
-const save = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* 同上 */ } };
+const save = () => { S.t = Date.now(); achCheck(); try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* 同上 */ } CLOUD.queue(); };
+// ブラウザが勝手に記録を消さないよう たのむ(きいてくれない機種もある)
+try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (e) { /* なくても動く */ }
+const RTAG = ['N', 'R', 'SR', 'UR'];
+const IN_DECK = window.DECK_COUNTS || {};
 const ownEl = () => EL.filter(e => S.el[e.n]).length, ownCp = () => CP.filter(c => S.cp[c.id]).length;
 
 function toast(t, ms) { document.querySelectorAll('.toast').forEach(x => x.remove()); const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), ms || 1800); }
-function cardHTML(sym, cls, extra) {
+function cardHTML(sym, cls, extra, inner) {
   const e = bySym[sym];
   const ph = HAS.has(e.n) ? `<img class="ph" src="img/el/${e.n}.jpg" alt="" loading="lazy">` : `<div class="ph em">${e.em}</div>`;
-  return `<button type="button" class="card ${cls || ''}" style="--c:${CAT_COLOR[e.cat]}" data-sym="${sym}" ${extra || ''}><i>${e.n}</i>${ph}<b data-nofuri>${sym}</b><span>${esc(e.ja)}</span></button>`;
+  return `<button type="button" class="card ${cls || ''}" style="--c:${CAT_COLOR[e.cat]}" data-sym="${sym}" ${extra || ''}><i>${e.n}</i><u class="rty r${e.r}" data-nofuri>${RTAG[e.r]}</u>${ph}<b data-nofuri>${sym}</b><span>${esc(e.ja)}</span>${inner || ''}</button>`;
 }
 function topBar(title, backFn, opt) {
   opt = opt || {};
   return `<div class="top">${backFn ? `<button class="back" id="${opt.confirm ? 'quit' : 'back'}" ${opt.confirm ? '' : 'data-noconfirm'}>← ${opt.backLabel || 'もどる'}</button>` : ''}<h2>${title}</h2><span class="coins">🧪 ${S.coins}</span></div>`;
 }
-let backHandler = null;
+let backHandler = null, atHome = false;
 document.addEventListener('click', e => { const b = e.target.closest('#back, #quit'); if (b && backHandler) backHandler(); });
-function screen(html, onBack) { app.innerHTML = html; backHandler = onBack || null; window.scrollTo(0, 0); }
+function screen(html, onBack) { atHome = false; app.innerHTML = html; backHandler = onBack || null; window.scrollTo(0, 0); }
 
 // ---------- ホーム
 function home() {
@@ -88,17 +93,19 @@ function home() {
       <button class="btn" data-go="zukan"><i>📖</i>ずかん<small>元素 ${ownEl()}/118・化合物 ${ownCp()}/${CP.length}</small></button>
       <button class="btn" data-go="pack"><i>🎁</i>パック<small>🧪30で 元素カード3まい</small></button>
       <button class="btn" data-go="quiz"><i>❓</i>クイズ<small>正解で 🧪がもらえる</small></button>
-      <button class="btn" data-go="how"><i>💡</i>あそびかた<small>ルールを見る</small></button>
+      <button class="btn" data-go="ach"><i>🏅</i>じっせき<small>${achCount()} / ${ACH.length} たっせい</small></button>
     </div>
     <div class="prog"><div class="row" style="display:flex;justify-content:space-between"><b>🧪 ${S.coins}</b><span class="note">バトル ${S.wins}勝 / ${S.games}回</span></div>
       <div class="note">元素ずかん ${ownEl()} / 118</div><div class="bar"><i style="width:${ownEl() / 118 * 100}%"></i></div>
       <div class="note">化合物ずかん ${ownCp()} / ${CP.length}</div><div class="bar"><i style="width:${ownCp() / CP.length * 100}%"></i></div></div>
-    <p class="note" style="text-align:center"><a href="#" id="credit" style="color:var(--mute)">しゃしんについて</a></p>`);
-  app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { SE.play('select'); ({ battle: battleMenu, zukan: () => zukan('el'), pack: packScreen, quiz: quizMenu, how: howTo })[b.dataset.go](); });
+    <p class="note" style="text-align:center"><a href="#" id="keep" style="color:${S.id ? 'var(--mute)' : 'var(--accent)'}">${S.id ? '☁️ ID「' + esc(S.id) + '」で ほぞん中' : '💾 きろくを ネットにも ほぞんする'}</a> ・ <a href="#" id="credit" style="color:var(--mute)">しゃしんについて</a></p>`);
+  atHome = true;
+  $('#keep').onclick = e => { e.preventDefault(); keepScreen(); };
+  app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { SE.play('select'); ({ battle: battleMenu, zukan: () => zukan('el'), pack: packScreen, quiz: quizMenu, ach: achScreen })[b.dataset.go](); });
   $('#credit').onclick = e => { e.preventDefault(); credits(); };
 }
 function howTo() {
-  screen(`${topBar('あそびかた', home)}
+  screen(`${topBar('あそびかた', battleMenu)}
     <div class="steps">
       <div><b>カードを2まい とる</b><br>まん中の「実験台」の5まいか、山札から えらぶ。</div>
       <div><b>化合物を つくる</b><br>手ふだの元素を組み合わせる。たとえば H が2まいと O が1まいで「水 H<sub>2</sub>O」。大きい化合物ほど点が高い。</div>
@@ -111,7 +118,7 @@ function howTo() {
       <div class="prog"><b>⚖️ 中和(ちゅうわ)</b><span class="note">同じターンに 酸とアルカリを両方つくると +2点。</span></div>
       <div class="prog"><b>♻️ 2回目からは1点</b><span class="note">同じ化合物を もう一度つくっても1点。いろいろな化合物をつくろう。</span></div>
     </div>
-    <button class="btn main" id="go">バトルを はじめる</button>`, home);
+    <button class="btn main" id="go">バトルに もどる</button>`, battleMenu);
   $('#go').onclick = battleMenu;
 }
 function credits() {
@@ -133,7 +140,9 @@ function battleMenu() {
         <div class="acts"><button class="btn" id="mk">へやを つくる</button><button class="btn" id="jn">へやに はいる</button></div></div>
       <div class="prog"><b>🤝 1台で ふたり</b><span class="note">1台のスマホを、かわりばんこに わたして遊ぶ。</span><button class="btn" id="local">はじめる</button></div>
       <label class="prog" style="display:flex;align-items:center;gap:10px"><input type="checkbox" id="hints" ${S.hints ? 'checked' : ''} style="width:22px;height:22px"><span><b>ヒントを出す</b><br><span class="note">つくれる化合物を 教えてくれる。なしにすると、自分でカードをえらんで作る。</span></span></label>
+      <p class="note" style="text-align:center"><a href="#" id="rule" style="color:var(--mute)">💡 ルールを見る</a></p>
     </div>`, home);
+  $('#rule').onclick = e => { e.preventDefault(); howTo(); };
   app.querySelectorAll('#lv button').forEach(b => b.onclick = () => { S.lv = +b.dataset.lv; save(); battleMenu(); });
   $('#hints').onchange = e => { S.hints = e.target.checked; save(); };
   $('#cpu').onclick = () => startBattle({ mode: 'cpu', lv: S.lv, names: [S.name || 'あなた', ['やさしいロボ', 'ふつうロボ', 'つよいロボ'][S.lv]] });
@@ -162,11 +171,22 @@ function drawBattle() {
   const G = B.G, v = viewer(), p = G.players[v], mine = myTurn() && G.winner === null && !B.busy;
   const over = mine ? E.overHand(G) : 0;
   const can = E.makeable(p.hand), near = E.near(p.hand);
-  const needSyms = new Set(near.map(x => x.need));
+  // アシスト: 実験台のカードのうち「とれば化合物がつくれる」ものを光らせる
+  const assist = {}, assist2 = new Set();
+  if (mine && G.takes > 0 && S.hints) {
+    const have = new Set(can.map(c => c.id)), best = l => l.sort((a, b) => E.pointsFor(G, v, b) - E.pointsFor(G, v, a))[0];
+    G.market.forEach((m, i) => { if (!m) return; const nw = E.makeable(p.hand.concat(m)).filter(c => !have.has(c.id)); if (nw.length) assist[i] = best(nw); });
+    if (G.takes >= 2) for (let i = 0; i < G.market.length; i++) for (let j = i + 1; j < G.market.length; j++) {
+      if (!G.market[i] || !G.market[j]) continue;
+      const one = new Set([...E.makeable(p.hand.concat(G.market[i])), ...E.makeable(p.hand.concat(G.market[j]))].map(c => c.id));
+      if (E.makeable(p.hand.concat(G.market[i], G.market[j])).some(c => !have.has(c.id) && !one.has(c.id))) { if (!assist[i]) assist2.add(i); if (!assist[j]) assist2.add(j); }
+    }
+  }
+  const nAssist = Object.keys(assist).length;
   let msg;
   if (G.winner !== null) msg = '';
   else if (!myTurn()) msg = `${esc(G.players[G.turn].name)}の ばん…`;
-  else if (G.takes > 0) msg = `カードを <b>${G.takes}まい</b> とろう`;
+  else if (G.takes > 0) msg = `カードを <b>${G.takes}まい</b> とろう` + (nAssist ? '。<b class="glowtxt">光るカード</b>で つくれるよ' : assist2.size ? '。うすく光る2まいで つくれるよ' : '');
   else if (over) msg = `手ふだが多いよ。<b>${over}まい</b> えらんで すてよう`;
   else if (can.length) msg = S.hints ? 'つくれる化合物が あるよ' : 'カードをえらんで「はんのう!」';
   else msg = 'つくれるものが ないときは「ターンおわり」';
@@ -182,7 +202,7 @@ function drawBattle() {
     ${whoHTML(1 - v, true)}
     <div class="table">
       <h3><span>実験台(ここから とれる)</span><span>山札 ${G.deck.length}まい</span></h3>
-      <div class="market">${G.market.map((s, i) => s ? cardHTML(s, mine && G.takes > 0 && S.hints && needSyms.has(s) ? 'hint' : '', `data-m="${i}"`) : '').join('')}<button class="deck" id="deck">山札<br>から</button></div>
+      <div class="market">${G.market.map((s, i) => s ? cardHTML(s, assist[i] ? 'hint' : assist2.has(i) ? 'hint2' : '', `data-m="${i}"`, assist[i] ? `<em class="mk">${fml(assist[i].f)}</em>` : '') : '').join('')}<button class="deck" id="deck">山札<br>から</button></div>
     </div>
     <div class="msg">${msg}</div>
     <div class="chips">${chips}</div>
@@ -234,6 +254,7 @@ function noteMade(ev, who) {
   const c = E.byId[ev.id];
   if (!S.cp[c.id]) { B.newCp.push(c.id); }
   S.cp[c.id] = (S.cp[c.id] || 0) + 1;
+  if (c.t === 'acid') stAdd('acid'); if (c.t === 'alkali') stAdd('alkali'); if (ev.neutral) stAdd('neutral'); if (ev.combo) stAdd('combo'); if (c.pt >= 13) stAdd('big');
   for (const s of Object.keys(c.p)) { const n = bySym[s].n; if (!S.el[n]) S.el[n] = 1; }
   save();
 }
@@ -298,7 +319,7 @@ function finish() {
   const G = B.G, w = G.winner, local = B.mode === 'local', win = local || w === B.me;
   let coin = local ? 25 : win ? [30, 40, 60][B.mode === 'cpu' ? B.lv : 1] : 15;
   const bonus = B.newCp.length * 5;
-  S.coins += coin + bonus; S.games++; if (win && !local) S.wins++; save();
+  S.coins += coin + bonus; S.games++; if (win && !local) S.wins++; if (win && B.mode === 'cpu' && B.lv === 2) stAdd('w2'); if (B.mode === 'net') stAdd('net'); if (local) stAdd('local'); save();
   win ? FX.win() : FX.lose(); if (win) confetti();
   screen(`<div class="hero"><div class="atoms">${win ? '🏆' : '🧪'}</div><h1 style="font-size:28px">${local ? esc(G.players[w].name) + 'の 勝ち!' : win ? 'あなたの 勝ち!' : 'ざんねん、まけ…'}</h1>
       <p>${G.players.map(p => `${esc(p.name)} ${p.score}点`).join(' / ')}</p></div>
@@ -370,8 +391,97 @@ const NET = (() => {
   api.rematch = () => { if (api.host) { const names = B.G.players.map(p => p.name); const G = E.newGame(names); startBattle({ mode: 'net', me: 0, G }); api.sendGame(G); } else toast('へやを つくった人が「もういちど」を おしてね'); };
   api.leave = () => { if (es) { es.close(); es = null; } if (api.code && api.host) { const c = api.code; auth().then(t => fetch(`${FB.db}/gensoRooms/${c}.json?auth=${t}`, { method: 'DELETE' })).catch(() => {}); } api.code = null; api.onRoom = null; room = null; lastSeq = -1; };
   Object.defineProperty(api, 'lastSeq', { get: () => lastSeq, set: v => { lastSeq = v; } });
+  api.auth = auth; api.FB = FB;
   return api;
 })();
+
+// ---------- 記録のクラウド保存(ひなはるコレクトと同じ方式: 自分で決めた「ID」で もどせる。パスワードなし)
+// 場所は gensoSaves/<ID>。ID は 2〜12文字(ひらがな・カタカナ・英数字)。大文字・全角は そろえる
+const CLOUD = (() => {
+  const normId = v => String(v || '').normalize('NFKC').trim().toLowerCase();
+  const idOk = id => /^[a-z0-9ぁ-んァ-ヶー_-]{2,12}$/.test(id);
+  const u = async id => `${NET.FB.db}/gensoSaves/${encodeURIComponent(id)}.json?auth=${await NET.auth()}`;
+  let DEV = null, timer = null, last = 0;
+  try { DEV = localStorage.getItem('genso-dev'); if (!DEV) { DEV = Math.random().toString(36).slice(2, 12); localStorage.setItem('genso-dev', DEV); } } catch (e) { DEV = 'x' + Math.random().toString(36).slice(2, 12); }
+  const keep = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* 同上 */ } };
+  const api = { normId, idOk };
+  // ID の 中身(データ本体は 読まない)。なければ null
+  api.head = async id => { const r = await fetch(await u(id)); if (!r.ok) throw new Error('net'); const d = await r.json(); return d && d.data ? { at: d.at, dev: d.dev || null } : null; };
+  // ID の データを読む。なければ null(つかわれていない ID)
+  api.load = async id => { const r = await fetch(await u(id)); if (!r.ok) throw new Error('net'); const d = await r.json(); return d && d.data ? JSON.parse(d.data) : null; };
+  api.save = async force => {
+    if (!S.id) return false;
+    try {
+      if (!force && S.cloudAt) {
+        const h = await api.head(S.id);
+        // ID が消された・ほかのスマホが あとから保存した → このスマホは その ID を はなれる
+        if (!h || (h.dev !== DEV && h.at > S.cloudAt)) { const old = S.id; S.id = null; S.cloudAt = 0; keep(); toast(`ID「${old}」は ほかのスマホで つかわれたので、このスマホの 自動保存を とめたよ`, 4000); return false; }
+      }
+      const at = Date.now();
+      const r = await fetch(await u(S.id), { method: 'PUT', body: JSON.stringify({ data: JSON.stringify(S), at, dev: DEV }) });
+      if (!r.ok) return false;
+      S.cloudAt = at; last = at; keep(); return true;
+    } catch (e) { return false; }
+  };
+  // 記録が変わったら、少しまとめてから保存(4秒後。前の保存から20秒は あける)
+  api.queue = () => { if (!S.id || timer) return; timer = setTimeout(() => { timer = null; api.save(); }, Math.max(4000, 20000 - (Date.now() - last))); };
+  api.adopt = (data, id) => { S = Object.assign(JSON.parse(JSON.stringify(S_DEF)), data, { id, cloudAt: 0 }); keep(); };
+  document.addEventListener('visibilitychange', () => { if (document.hidden && S.id) api.save(); });
+  return api;
+})();
+function ask(html, yes) {
+  return new Promise(res => {
+    const d = document.createElement('div'); d.className = 'ov';
+    d.innerHTML = `<div class="box">${html}<div class="acts"><button class="btn main" id="y">${yes}</button><button class="btn" id="n">やめる</button></div></div>`;
+    document.body.appendChild(d);
+    $('#n', d).onclick = () => { d.remove(); res(false); };
+    $('#y', d).onclick = () => { d.remove(); res(true); };
+  });
+}
+function keepScreen(note) {
+  const sum = d => `元素 ${Object.keys(d.el || {}).length} / 118・化合物 ${Object.keys(d.cp || {}).length} / ${CP.length}・🧪 ${d.coins | 0}・バトル ${d.wins | 0}勝`;
+  screen(`${topBar('きろくの ほぞん', home)}
+    <div class="prog" style="text-align:center">${S.id
+      ? `<b>☁️ ID「<span data-nofuri>${esc(S.id)}</span>」で ほぞん中</b>
+        <span class="note">記録は、あそぶたびに 自動で ネットにも ほぞんされる。<br>アプリのデータが消えても、スマホをかえても、この ID でログインすれば もどせる。</span>
+        <span class="note">${S.cloudAt ? 'さいごの ほぞん: ' + new Date(S.cloudAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'まだ ネットに ほぞんできていない'}</span>
+        <button class="btn main" id="now">☁️ いま ほぞんする</button>`
+      : `<b>まだ この端末の中だけに ほぞんされている</b>
+        <span class="note">ID を きめると、ネットにも ほぞんされる。アプリのデータが消えても、スマホをかえても もどせるよ。</span>`}</div>
+    <div class="prog"><b>${S.id ? 'べつの ID で ほぞんする' : 'ID を きめて ほぞんする'}</b>
+      <input class="txt" id="nid" maxlength="12" placeholder="すきな ID(2〜12文字)" autocomplete="off" autocapitalize="off">
+      <span class="note">ひらがな・カタカナ・英数字。パスワードは いらない。ほかの人と 同じ ID は つかえない。</span>
+      <button class="btn ${S.id ? '' : 'main'}" id="mkid">この ID で ほぞんする</button></div>
+    <div class="prog"><b>ID で ログイン(記録を よみこむ)</b>
+      <input class="txt" id="lid" maxlength="12" placeholder="まえに きめた ID" autocomplete="off" autocapitalize="off">
+      <button class="btn" id="login">ログイン</button>
+      <span class="note">ログインすると、この端末の 今の記録は その ID の記録に 入れかわる。</span></div>
+    <p class="note" id="kmsg" style="text-align:center;color:var(--accent)">${note || ''}</p>`, home);
+  const msg = t => { $('#kmsg').textContent = t; SE.play('ng'); };
+  const now = $('#now'); if (now) now.onclick = async () => { now.disabled = true; const ok = await CLOUD.save(); keepScreen(ok ? '☁️ ほぞんした!' : S.id ? 'ほぞんできなかった(インターネットを たしかめてね)' : ''); };
+  $('#mkid').onclick = async () => {
+    const id = CLOUD.normId($('#nid').value);
+    if (!CLOUD.idOk(id)) return msg('ID は 2〜12文字。ひらがな・カタカナ・英数字で きめてね');
+    if (id === S.id) return msg('いま つかっている ID だよ');
+    let used; try { used = await CLOUD.load(id); } catch (e) { return msg('インターネットに つながらない'); }
+    if (used) {
+      if (!await ask(`<b>ID「${esc(id)}」は もう つかわれている</b><p>${sum(used)}</p><p class="note">自分の ID なら「ログイン」の方を つかってね。<br>この記録を 消して、今の記録で 上書きする?</p>`, '上書きする')) return;
+      if (!await ask(`<b>ほんとうに 上書きする?</b><p class="note">ID「${esc(id)}」に入っていた記録(${sum(used)})は 消えて、もどせない。</p>`, '消して 上書きする')) return;
+    }
+    const before = S.id, bAt = S.cloudAt; S.id = id; S.cloudAt = 0;
+    if (!await CLOUD.save(true)) { S.id = before; S.cloudAt = bAt; return msg('ほぞんできなかった。もういちど ためしてね'); }
+    SE.play('perfect'); keepScreen(`☁️ ID「${id}」で ほぞんした!`);
+  };
+  $('#login').onclick = async () => {
+    const id = CLOUD.normId($('#lid').value);
+    if (!CLOUD.idOk(id)) return msg('ID は 2〜12文字。ひらがな・カタカナ・英数字だよ');
+    if (id === S.id) return msg('いま つかっている ID だよ');
+    let d; try { d = await CLOUD.load(id); } catch (e) { return msg('インターネットに つながらない'); }
+    if (!d) return msg(`ID「${id}」の記録は 見つからなかった`);
+    if (!await ask(`<b>ID「${esc(id)}」で ログインする?</b><p>${sum(d)}</p><p class="note">この端末の 今の記録(${sum(S)})は 入れかわるよ。${S.id ? '' : '<br>今の記録を のこしたい時は、先に ID を きめて ほぞんしてね。'}</p>`, 'ログインする')) return;
+    CLOUD.adopt(d, id); await CLOUD.save(true); SE.play('perfect'); keepScreen('ログインした!');
+  };
+}
 function pushNet() { if (B && B.mode === 'net') NET.sendGame(B.G); }
 function netLobby(isHost) {
   const nameIn = `<input class="txt" id="nm" maxlength="8" placeholder="なまえ(8文字まで)" value="${esc(S.name)}">`;
@@ -412,6 +522,74 @@ function onRoom(room) {
   else if (G.last && G.last.type === 'end' && G.turn === B.me) yourTurn();
 }
 
+// ---------- じっせき(実績)。たっせいすると 🧪 がもらえる
+const stAdd = (k, n) => { S.st = S.st || {}; S.st[k] = (S.st[k] || 0) + (n === undefined ? 1 : n); };
+const st = k => (S.st && S.st[k]) || 0;
+const catOwn = c => EL.filter(e => e.cat === c && S.el[e.n]).length, catAll = c => EL.filter(e => e.cat === c).length;
+const ACH = (() => {
+  const A = [];
+  const add = (g, id, ic, name, desc, v, n, r) => A.push({ g, id, ic, name, desc, v, n, r });
+  // バトル
+  add('バトル', 'g1', '🎮', 'はじめてのバトル', 'バトルを 1回 さいごまで あそぶ', () => S.games, 1, 10);
+  add('バトル', 'w1', '🥉', 'はじめての勝ち', 'バトルで 1回 勝つ', () => S.wins, 1, 10);
+  add('バトル', 'w5', '🥈', '5勝', 'バトルで 5回 勝つ', () => S.wins, 5, 20);
+  add('バトル', 'w20', '🥇', '20勝', 'バトルで 20回 勝つ', () => S.wins, 20, 40);
+  add('バトル', 'w50', '🏆', '50勝', 'バトルで 50回 勝つ', () => S.wins, 50, 80);
+  add('バトル', 'w2', '🤖', 'つよいロボに 勝った', '「つよい」の コンピューターに 勝つ', () => st('w2'), 1, 30);
+  add('バトル', 'w2b', '🦾', 'ロボはかせ', '「つよい」の コンピューターに 10回 勝つ', () => st('w2'), 10, 60);
+  add('バトル', 'net', '📱', 'スマホで たいせん', 'スマホどうしの たいせんを さいごまで あそぶ', () => st('net'), 1, 20);
+  add('バトル', 'loc', '🤝', 'かわりばんこ', '1台で ふたりの たいせんを さいごまで あそぶ', () => st('local'), 1, 10);
+  // はんのう
+  add('はんのう', 'c5', '⚗️', 'じっけん はじめ', '化合物を 5種類 つくる', ownCp, 5, 10);
+  add('はんのう', 'c15', '🧫', 'じっけん だいすき', '化合物を 15種類 つくる', ownCp, 15, 20);
+  add('はんのう', 'c30', '🔬', 'けんきゅういん', '化合物を 30種類 つくる', ownCp, 30, 40);
+  add('はんのう', 'call', '👩‍🔬', '化合物ずかん コンプリート', '化合物を ぜんぶ つくる', ownCp, CP.length, 150);
+  add('はんのう', 'n100', '💯', '100回 はんのう', '化合物を あわせて 100回 つくる', () => Object.values(S.cp).reduce((a, b) => a + b, 0), 100, 40);
+  add('はんのう', 'acid', '🧪', '酸の つかい手', '酸を 10回 つくる', () => st('acid'), 10, 20);
+  add('はんのう', 'alk', '🧼', 'アルカリの つかい手', 'アルカリを 10回 つくる', () => st('alkali'), 10, 20);
+  add('はんのう', 'neu1', '⚖️', 'はじめての 中和', '同じターンに 酸とアルカリを つくる', () => st('neutral'), 1, 20);
+  add('はんのう', 'neu10', '🌊', '中和マスター', '中和を 10回 きめる', () => st('neutral'), 10, 50);
+  add('はんのう', 'combo', '🔥', 'コンボ 10回', '1ターンに 2つ以上つくるのを 10回', () => st('combo'), 10, 20);
+  add('はんのう', 'big', '💥', '大きな化合物', '13点より上の 化合物を つくる', () => st('big'), 1, 30);
+  // あつめる
+  add('あつめる', 'e20', '📗', '元素 20こ', '元素を 20種類 あつめる', ownEl, 20, 10);
+  add('あつめる', 'e50', '📘', '元素 50こ', '元素を 50種類 あつめる', ownEl, 50, 30);
+  add('あつめる', 'e80', '📙', '元素 80こ', '元素を 80種類 あつめる', ownEl, 80, 60);
+  add('あつめる', 'eall', '👑', '周期表 コンプリート', '元素を 118種類 ぜんぶ あつめる', ownEl, 118, 300);
+  add('あつめる', 'e1to20', '🔢', '水兵リーベ', '原子番号 1〜20 を ぜんぶ あつめる', () => EL.filter(e => e.n <= 20 && S.el[e.n]).length, 20, 30);
+  Object.keys(CAT_COLOR).forEach((c, i) => add('あつめる', 'cat' + i, '🧩', c + ' コンプリート', '「' + c + '」の 元素を ぜんぶ あつめる', () => catOwn(c), catAll(c), catAll(c) >= 15 ? 60 : 30));
+  add('あつめる', 'ur1', '🌈', 'はじめての UR', 'ウルトラレアの 元素を 1こ あてる', () => EL.filter(e => e.r === 3 && S.el[e.n]).length, 1, 20);
+  add('あつめる', 'ur10', '✨', 'UR ハンター', 'ウルトラレアの 元素を 10種類 あつめる', () => EL.filter(e => e.r === 3 && S.el[e.n]).length, 10, 60);
+  add('あつめる', 'p10', '🎁', 'パック 10こ', 'パックを 10こ あける', () => st('pack'), 10, 20);
+  add('あつめる', 'p50', '🎉', 'パック 50こ', 'パックを 50こ あける', () => st('pack'), 50, 50);
+  add('あつめる', 'p150', '🎊', 'パック 150こ', 'パックを 150こ あける', () => st('pack'), 150, 100);
+  // クイズ
+  add('クイズ', 'q1', '❓', 'クイズに ちょうせん', 'クイズを 1回 さいごまで やる', () => st('quiz'), 1, 10);
+  add('クイズ', 'qp', '🎯', 'まんてん', 'クイズで 10問 ぜんぶ 正解する', () => Object.values(S.quizBest).filter(x => x >= 10).length, 1, 20);
+  add('クイズ', 'qall', '🎓', 'ぜんぶ まんてん', '5つの クイズ ぜんぶで まんてんを とる', () => Object.values(S.quizBest).filter(x => x >= 10).length, 5, 100);
+  add('クイズ', 'q100', '🧠', '100問 正解', 'クイズで あわせて 100問 正解する', () => st('qok'), 100, 40);
+  add('クイズ', 'q500', '📚', '500問 正解', 'クイズで あわせて 500問 正解する', () => st('qok'), 500, 100);
+  return A;
+})();
+const achCount = () => ACH.filter(a => S.ach && S.ach[a.id]).length;
+function achCheck() {
+  S.ach = S.ach || {}; S.st = S.st || {};
+  const got = ACH.filter(a => !S.ach[a.id] && a.v() >= a.n);
+  if (!got.length) return;
+  let coin = 0; got.forEach(a => { S.ach[a.id] = Date.now(); coin += a.r; }); S.coins += coin;
+  const d = document.createElement('div'); d.className = 'achpop';
+  d.innerHTML = `<b>🏅 じっせき たっせい!</b><span>${got.length <= 2 ? got.map(a => a.ic + ' ' + esc(a.name)).join('<br>') : got.slice(0, 2).map(a => a.ic + ' ' + esc(a.name)).join('<br>') + '<br>ほか ' + (got.length - 2) + 'こ'}</span><i>🧪 +${coin}</i>`;
+  document.body.appendChild(d); setTimeout(() => d.remove(), 3600);
+  try { SE.play('perfect'); } catch (e) { /* 音なしでも進む */ }
+}
+function achScreen() {
+  const groups = [...new Set(ACH.map(a => a.g))], n = achCount();
+  screen(`${topBar('じっせき', home)}
+    <div class="prog"><div class="note">たっせい ${n} / ${ACH.length}</div><div class="bar"><i style="width:${n / ACH.length * 100}%"></i></div>
+      <span class="note">たっせいすると 🧪 がもらえる。</span></div>
+    ${groups.map(g => `<h3 class="achh">${g}</h3><div class="achl">${ACH.filter(a => a.g === g).map(a => { const ok = S.ach[a.id], v = Math.min(a.n, a.v()); return `<div class="ach ${ok ? 'ok' : ''}"><i>${ok ? a.ic : '🔒'}</i><div><b>${esc(a.name)}</b><span class="note">${esc(a.desc)}</span>${ok ? '' : a.n > 1 ? `<div class="bar"><i style="width:${v / a.n * 100}%"></i></div>` : ''}</div><em>${ok ? '✅' : (a.n > 1 ? v + '/' + a.n + '<br>' : '') + '🧪' + a.r}</em></div>`; }).join('')}</div>`).join('')}`, home);
+}
+
 // ---------- ずかん
 let zTab = 'el';
 function zukan(tab) {
@@ -446,9 +624,9 @@ function elDetail(n) {
     ${own ? (HAS.has(n) ? `<img class="photo" src="img/el/${n}.jpg" alt="">` : `<div class="bigem">${e.em}</div>`) : '<div class="bigem">❔</div>'}
     <div class="sym" data-nofuri>${e.sym}</div><div class="nm" style="font-size:24px;font-weight:900">${own ? esc(e.ja) : '？？？'}</div>
     ${own ? `<p>${e.em} ${esc(e.note)}</p>
-    <dl class="facts"><dt>原子番号</dt><dd>${e.n}</dd><dt>なかま</dt><dd>${esc(e.cat)}</dd>${e.st ? `<dt>ふつうの温度で</dt><dd>${e.st}</dd>` : ''}<dt>レア度</dt><dd>${RARE[e.r]}</dd><dt>もっている数</dt><dd>${own}まい</dd></dl>
+    <dl class="facts"><dt>原子番号</dt><dd>${e.n}</dd><dt>なかま</dt><dd>${esc(e.cat)}</dd>${e.st ? `<dt>ふつうの温度で</dt><dd>${e.st}</dd>` : ''}<dt>レア度</dt><dd><u class="rty r${e.r}" data-nofuri>${RTAG[e.r]}</u> ${RARE[e.r]}</dd><dt>出るところ</dt><dd>${IN_DECK[e.sym] ? 'バトルとパック' : 'パックだけ'}</dd><dt>もっている数</dt><dd>${own}まい</dd></dl>
     ${uses.length ? `<div class="chips">${uses.map(c => `<span class="chip near" style="color:var(--ink)">${c.em} ${fml(c.f)} ${esc(c.ja)}</span>`).join('')}</div>` : ''}`
-    : `<p class="note">まだ もっていない元素。原子番号 ${e.n}・${esc(e.cat)}。<br>パックで あてるか、バトルで使うと 見られるよ。</p>`}
+    : `<p class="note">まだ もっていない元素。原子番号 ${e.n}・${esc(e.cat)}。<br>${IN_DECK[e.sym] ? 'バトルで この元素を使って 化合物をつくるか、パックで あてると 見られるよ。' : 'バトルには出てこない元素。パックで あてると 見られるよ。'}</p>`}
     <button class="btn main">とじる</button></div>`;
   document.body.appendChild(d); SE.play('select');
   d.onclick = ev => { if (ev.target === d || ev.target.closest('.btn')) d.remove(); };
@@ -456,24 +634,40 @@ function elDetail(n) {
 
 // ---------- パック
 const PACK_COST = 30;
+const DECK_KINDS = Object.keys(IN_DECK).length;
 function packScreen(result) {
+  const left = result ? result.filter(r => !r.open).length : 0;
   screen(`${topBar('パック', home)}
-    <div class="prog" style="text-align:center"><b>元素パック</b><span class="note">元素カードが3まい出る。めずらしい元素ほど出にくい。同じカードが出たら 🧪3 にかわる。</span>
-      <div class="pack" id="pk">${result ? result.map((r, i) => `<span class="slot" style="animation-delay:${i * 0.25}s">${cardHTML(r.e.sym, 'big pop rare' + r.e.r, `data-n="${r.e.n}"`)}${r.isNew ? '<span class="newtag">NEW!</span>' : ''}</span>`).join('') : '<div style="font-size:90px">🎁</div>'}</div>
-      ${result ? `<p>${result.map(r => `${esc(r.e.ja)}(${RARE[r.e.r]})`).join('・')}</p>` : ''}
-      <button class="btn main" id="open" ${S.coins < PACK_COST ? 'disabled' : ''}>🧪${PACK_COST}で あける</button>
-      ${S.coins < PACK_COST ? '<p class="note">🧪が たりない。バトルやクイズで ためよう。</p>' : ''}</div>
-    <p class="note" style="text-align:center">元素ずかん ${ownEl()} / 118</p>`, home);
-  $('#open').onclick = () => {
+    <div class="prog" style="text-align:center"><b>元素パック</b>
+      <span class="note" id="pmsg">${result ? (left ? `カードを タップして めくろう(あと ${left}まい)` : result.map(r => `${esc(r.e.ja)}(${RARE[r.e.r]})`).join('・')) : '元素カードが3まい出る。めずらしい元素ほど出にくい。同じカードが出たら 🧪3 にかわる。'}</span>
+      <div class="pack" id="pk">${result ? result.map((r, i) => `<span class="flip ${r.open ? 'open done' : ''}" data-i="${i}"><span class="in"><span class="face bk"><b>⚗️</b><small>げんそラボ</small></span><span class="face fr">${cardHTML(r.e.sym, 'big rare' + r.e.r)}</span></span>${r.open && r.isNew ? '<span class="newtag">NEW!</span>' : ''}</span>`).join('') : '<div style="font-size:90px">🎁</div>'}</div>
+      <div class="rlegend" data-nofuri><span><u class="rty r0">N</u> ノーマル</span><span><u class="rty r1">R</u> レア</span><span><u class="rty r2">SR</u> スーパーレア</span><span><u class="rty r3">UR</u> ウルトラレア</span></div>
+      ${left ? '' : `<button class="btn main" id="open" ${S.coins < PACK_COST ? 'disabled' : ''}>🧪${PACK_COST}で ${result ? 'もう1パック' : 'あける'}</button>`}
+      ${!left && S.coins < PACK_COST ? '<p class="note">🧪が たりない。バトルやクイズで ためよう。</p>' : ''}</div>
+    <div class="prog"><span class="note">バトルの山札に入っているのは ${DECK_KINDS}種類だけ。のこりの ${118 - DECK_KINDS}種類は、パックでしか 出会えない。</span>
+      <div class="note">元素ずかん ${ownEl()} / 118</div><div class="bar"><i style="width:${ownEl() / 118 * 100}%"></i></div></div>`, home);
+  const op = $('#open');
+  if (op) op.onclick = () => {
     if (S.coins < PACK_COST) return;
     S.coins -= PACK_COST;
     const W = [10, 6, 3, 1], pool = []; EL.forEach(e => { for (let i = 0; i < W[e.r]; i++) pool.push(e); });
     const res = [];
-    for (let i = 0; i < 3; i++) { const e = pick(pool); const isNew = !S.el[e.n]; S.el[e.n] = (S.el[e.n] || 0) + 1; if (!isNew) S.coins += 3; res.push({ e, isNew }); }
-    save(); FX.shake(); const pk = $('#pk'); if (pk) pk.classList.add('shaking');
-    setTimeout(() => { res.forEach((r, i) => FX.card(i, r.e.r)); packScreen(res); }, 520);
+    for (let i = 0; i < 3; i++) { const e = pick(pool); const isNew = !S.el[e.n]; S.el[e.n] = (S.el[e.n] || 0) + 1; if (!isNew) S.coins += 3; res.push({ e, isNew, open: false }); }
+    stAdd('pack'); save(); FX.shake(); const pk = $('#pk'); if (pk) pk.classList.add('shaking'); op.disabled = true;
+    setTimeout(() => packScreen(res), 520);
   };
-  app.querySelectorAll('[data-n]').forEach(b => b.onclick = () => elDetail(+b.dataset.n));
+  app.querySelectorAll('.flip').forEach(fl => fl.onclick = () => {
+    const r = result[+fl.dataset.i];
+    if (r.open) { if (fl.classList.contains('done')) elDetail(r.e.n); return; }
+    r.open = true; fl.classList.add('open'); FX.card(0, r.e.r);
+    if (r.e.r >= 3) confetti();
+    setTimeout(() => {
+      if (result.every(x => x.open)) return packScreen(result);
+      fl.classList.add('done');
+      if (r.isNew) fl.insertAdjacentHTML('beforeend', '<span class="newtag">NEW!</span>');
+      const m = $('#pmsg'); if (m) m.textContent = `カードを タップして めくろう(あと ${result.filter(x => !x.open).length}まい)`;
+    }, 650);
+  });
 }
 
 // ---------- クイズ
@@ -533,7 +727,7 @@ function startQuiz(set) {
 }
 function quizResult(Q) {
   const coin = Q.ok * 2 + (Q.ok === 10 ? 10 : 0);
-  S.coins += coin; S.quizBest[Q.set.k] = Math.max(S.quizBest[Q.set.k] || 0, Q.ok); save();
+  S.coins += coin; S.quizBest[Q.set.k] = Math.max(S.quizBest[Q.set.k] || 0, Q.ok); stAdd('qok', Q.ok); stAdd('quiz'); save();
   SE.play(Q.ok === 10 ? 'perfect' : 'result');
   screen(`<div class="hero"><div class="atoms">${Q.ok === 10 ? '🎉' : Q.ok >= 7 ? '😊' : '💪'}</div><h1 style="font-size:30px">${Q.ok} / 10</h1><p>🧪 +${coin}</p></div>
     <div class="acts"><button class="btn main" id="again">もういちど</button><button class="btn" id="hm">ホーム</button></div>`);
@@ -541,5 +735,6 @@ function quizResult(Q) {
 }
 
 home();
+if (S.id) CLOUD.save();
 // テスト用
-window.GL = { get S() { return S; }, get B() { return B; }, save, home, startBattle, E, NET };
+window.GL = { get S() { return S; }, get B() { return B; }, save, home, startBattle, E, NET, CLOUD };

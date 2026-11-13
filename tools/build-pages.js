@@ -1,0 +1,105 @@
+// GitHub Pages 用のPWA版を docs/ に書き出す。
+// app/index.html は Artifact 用(外枠なし)なので、ここで <!doctype> と <head> を付け、マニフェストとサービスワーカーを足す。
+// 実行: node tools/build-pages.js
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+const APP = path.join(__dirname, '../app');
+const OUT = path.join(__dirname, '../docs');
+
+fs.rmSync(OUT, { recursive: true, force: true });
+fs.cpSync(APP, OUT, { recursive: true });
+
+// index.html: <div id="app"> より前(title/meta/link/style)を head へ、残りを body へ
+const src = fs.readFileSync(path.join(APP, 'index.html'), 'utf8');
+const cut = src.indexOf('<div id="app">');
+const head = src.slice(0, cut), body = src.slice(cut);
+const html = `<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0f1a3c">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="げんそラボ">
+<style>:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); } body { margin: 0; } html, body { touch-action: pan-x pan-y; }</style>
+<script>/* 画面の拡大・縮小をしない(iPhone は viewport の指定を無視するので、ピンチを止める) */ ["gesturestart", "gesturechange"].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));</script>
+${head.trim()}
+</head>
+<body>
+${body.trim()}
+<script>
+// 新しい版が入ったら自動で読みなおす。アプリにもどってきたときも 新しい版がないか たしかめる
+if ('serviceWorker' in navigator) window.addEventListener('load', () => {
+  const had = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.register('sw.js').then(r => { r.update(); document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') r.update(); }); }).catch(() => {});
+  let done = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (had && !done) { done = true; location.reload(); } });
+});
+</script>
+</body>
+</html>
+`;
+fs.writeFileSync(path.join(OUT, 'index.html'), html);
+
+fs.writeFileSync(path.join(OUT, 'manifest.webmanifest'), JSON.stringify({
+  name: 'げんそラボ',
+  short_name: 'げんそラボ',
+  description: '元素を集めて化合物をつくるカードゲームと元素ずかん',
+  lang: 'ja',
+  start_url: './',
+  scope: './',
+  display: 'standalone',
+  orientation: 'portrait',
+  background_color: '#0f1a3c',
+  theme_color: '#0f1a3c',
+  icons: [
+    { src: 'icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+    { src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' },
+    { src: 'icons/maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+  ],
+}, null, 2));
+
+// サービスワーカー: 初回にアプリ一式を保存し(ブラウザの古いキャッシュを使わず、かならず取りなおす)、以後はオフラインでも動く。
+// キャッシュ名に中身のハッシュを入れ、更新があれば自動で入れ替わる。
+const files = [];
+(function walk(d, rel) {
+  for (const f of fs.readdirSync(d)) {
+    const p = path.join(d, f), r = rel ? rel + '/' + f : f;
+    if (fs.statSync(p).isDirectory()) walk(p, r); else files.push(r);
+  }
+})(OUT, '');
+const hash = crypto.createHash('sha1');
+files.sort().forEach(f => hash.update(f).update(fs.readFileSync(path.join(OUT, f))));
+const version = hash.digest('hex').slice(0, 10);
+// 元素の写真(約5MB)は最初にまとめて保存せず、ずかんで見たときに保存する(通信量をおさえる)
+const precache = ['./', ...files.filter(f => f !== 'index.html' && !f.startsWith('img/'))];
+const libs = [];
+fs.writeFileSync(path.join(OUT, 'sw.js'), `// 自動生成(tools/build-pages.js)。手で編集しない。
+const CACHE = 'genso-${version}';
+const PRECACHE = ${JSON.stringify(precache)};
+const LIBS = ${JSON.stringify(libs)};
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(PRECACHE.concat(LIBS).map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', e => {
+  e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.startsWith('genso-') && k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+});
+self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
+  const url = new URL(e.request.url);
+  // Google Fonts は使うたびに保存(オフラインでは代わりの書体で表示)
+  const isFont = url.host === 'fonts.googleapis.com' || url.host === 'fonts.gstatic.com';
+  e.respondWith(caches.match(e.request, { ignoreSearch: true }).then(hit => {
+    if (hit) return hit;
+    return fetch(e.request).then(res => {
+      if (res.ok && (isFont || url.host === 'cdnjs.cloudflare.com' || url.origin === location.origin)) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); }
+      return res;
+    }).catch(() => e.request.mode === 'navigate' ? caches.match('./') : Response.error());
+  }));
+});
+`);
+console.log('docs/ built:', files.length + 2, 'files, cache', version);

@@ -1,5 +1,5 @@
 // 自動生成(tools/build-pages.js)。手で編集しない。
-const CACHE = 'genso-1226a56ebd';
+const CACHE = 'genso-4c52ee9054';
 const PRECACHE = ["./","app.js","data/compounds.js","data/credits.js","data/elements.js","engine.js","furi.js","icons/apple-touch-icon.png","icons/icon-192.png","icons/icon-512.png","icons/maskable-512.png","manifest.webmanifest"];
 const LIBS = [];
 self.addEventListener('install', e => {

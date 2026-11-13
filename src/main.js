@@ -3,7 +3,7 @@ const EL = window.ELEMENTS, CP = window.COMPOUNDS, E = window.ENGINE;
 const bySym = {}, byN = {}; EL.forEach(e => { bySym[e.sym] = e; byN[e.n] = e; });
 const HAS = new Set(window.HAS_IMG || []);
 const CAT_COLOR = { アルカリ金属: '#ff8a65', アルカリ土類金属: '#ffb74d', 遷移金属: '#f08a8a', その他の金属: '#a9bcc6', 半金属: '#81c784', 非金属: '#5fc8f7', ハロゲン: '#ffd54f', 貴ガス: '#c58be0', ランタノイド: '#f48fb1', アクチノイド: '#d6a1e0', 超重元素: '#b79d92' };
-const TYPE = { acid: '酸', alkali: 'アルカリ', gas: '気体', salt: '塩', oxide: '酸化物', gem: 'たから', other: '' };
+const TYPE = { acid: '酸', alkali: 'アルカリ', gas: '気体', salt: 'えん(塩)', oxide: '酸化物', gem: 'たから', other: '' };
 const RARE = ['ノーマル', 'レア', 'スーパーレア', 'ウルトラレア'];
 const app = document.getElementById('app');
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

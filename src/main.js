@@ -98,11 +98,58 @@ function home() {
     <div class="prog"><div class="row" style="display:flex;justify-content:space-between"><b>🧪 ${S.coins}</b><span class="note">バトル ${S.wins}勝 / ${S.games}回</span></div>
       <div class="note">元素ずかん ${ownEl()} / 118</div><div class="bar"><i style="width:${ownEl() / 118 * 100}%"></i></div>
       <div class="note">化合物ずかん ${ownCp()} / ${CP.length}</div><div class="bar"><i style="width:${ownCp() / CP.length * 100}%"></i></div></div>
-    <p class="note" style="text-align:center"><a href="#" id="keep" style="color:${S.id ? 'var(--mute)' : 'var(--accent)'}">${S.id ? '☁️ ID「' + esc(S.id) + '」で ほぞん中' : '💾 きろくを ネットにも ほぞんする'}</a> ・ <a href="#" id="credit" style="color:var(--mute)">しゃしんについて</a></p>`);
+    <p class="note" style="text-align:center"><a href="#" id="keep" style="color:${S.id ? 'var(--mute)' : 'var(--accent)'}">${S.id ? '☁️ ID「' + esc(S.id) + '」で ほぞん中' : '💾 きろくを ネットにも ほぞんする'}</a> ・ <a href="#" id="credit" style="color:var(--mute)">しゃしんについて</a> ・ <a href="#" id="upd" style="color:var(--mute)">🔄 さいしんに こうしん</a></p>`);
   atHome = true;
   $('#keep').onclick = e => { e.preventDefault(); keepScreen(); };
+  $('#upd').onclick = e => { e.preventDefault(); appUpdate(); };
   app.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { SE.play('select'); ({ battle: battleMenu, zukan: () => zukan('el'), pack: packScreen, quiz: quizMenu, ach: achScreen })[b.dataset.go](); });
   $('#credit').onclick = e => { e.preventDefault(); credits(); };
+}
+// ---------- 最新に こうしん(ひなはるコレクトと同じ しくみ。2026-11-15)
+// 1) この端末に保存して読みなおし、同じか確かめる 2) 控えを作る 3) ネットを確かめる 4) ID があればクラウドに保存して読みなおす
+// ぜんぶ うまくいった時だけ、ゲームのキャッシュとサービスワーカーを消して読みなおす。記録(localStorage)は消さない
+const UPD_BAK = 'genso-update-backup', UPD_FLAG = 'genso-relogin';
+async function appUpdate() {
+  if (!await ask('<b>ゲームを 最新に こうしんする?</b><p class="note">記録は そのまま のこるよ</p>', '🔄 こうしんする')) return;
+  const d = document.createElement('div'); d.className = 'ov'; d.innerHTML = '<div class="box"><b>🔄 こうしん中…</b><p class="note" id="upMsg"></p></div>'; document.body.appendChild(d);
+  const msg = t => { const e = d.querySelector('#upMsg'); if (e) e.textContent = t; };
+  const fail = t => { d.remove(); SE.play('ng'); ask(`<b>こうしん できなかった</b><p>${t}</p><p class="note">記録は そのままだよ。あとで もう一度 ためしてね</p>`, 'OK'); };
+  msg('① この スマホに 保存して たしかめています');
+  save();
+  const snap = JSON.stringify(S);
+  let local = null; try { local = localStorage.getItem(SAVE_KEY); } catch (e) { /* 下で止める */ }
+  if (local !== snap) return fail('この スマホに 保存できなかった');
+  msg('② 控えを 作っています');
+  let bak = false;
+  try { localStorage.setItem(UPD_BAK, snap); bak = localStorage.getItem(UPD_BAK) === snap; } catch (e) { bak = false; }
+  msg('③ インターネットを たしかめています');
+  try { const r = await fetch('index.html?u=' + Date.now(), { cache: 'no-store' }); if (!r.ok) throw 0; } catch (e) { return fail('インターネットに つながっていない'); }
+  let cloud = false;
+  if (S.id) {
+    msg(`④ ID「${S.id}」に 保存して たしかめています`);
+    if (!await CLOUD.save(true) || !S.id) return fail('ID に 保存できなかった(ほかの スマホで つかわれているかも)');
+    try { const c = await CLOUD.load(S.id); cloud = !!c && Object.keys(c.el || {}).length === Object.keys(S.el).length && Object.keys(c.cp || {}).length === Object.keys(S.cp).length && (c.coins | 0) === (S.coins | 0); } catch (e) { cloud = false; }
+    if (!cloud) return fail('ID の 記録を たしかめられなかった');
+  }
+  if (!bak && !cloud) return fail('控えが 作れなかった(スマホの 空きが 少ないかも)。ID を きめてから ためしてね');
+  msg('⑤ 最新の ゲームを 読みこみます');
+  try { localStorage.setItem(UPD_FLAG, JSON.stringify({ id: S.id || '', t: S.t || 0 })); } catch (e) { /* なくても記録はのこる */ }
+  try { if (window.caches) for (const k of await caches.keys()) await caches.delete(k); } catch (e) { /* 消せなくても読みなおす */ }
+  try { if (navigator.serviceWorker) for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); } catch (e) { /* 同じ */ }
+  location.replace(location.pathname + '?u=' + Date.now());
+}
+// 読みなおした後: 前の記録のまま続いているか確かめる。なければ 控え → ID の順に もどす
+function updateAfter() {
+  let f = null; try { f = JSON.parse(localStorage.getItem(UPD_FLAG) || 'null'); } catch (e) { f = null; }
+  if (!f) return;
+  try { localStorage.removeItem(UPD_FLAG); } catch (e) { /* 次の起動でまた確かめるだけ */ }
+  history.replaceState(null, '', location.pathname);
+  const done = () => { toast(`🔄 最新に なったよ${S.id ? `(ID「${S.id}」で ログイン中)` : ''}`, 3000); try { localStorage.removeItem(UPD_BAK); } catch (e) { /* のこってもよい */ } };
+  if ((S.t || 0) >= f.t && (S.id || '') === f.id) { done(); return; }
+  let b = null; try { b = JSON.parse(localStorage.getItem(UPD_BAK) || 'null'); } catch (e) { b = null; }
+  const keep = () => { try { localStorage.setItem(SAVE_KEY, JSON.stringify(S)); } catch (e) { /* 同上 */ } };
+  if (b && (b.t || 0) >= f.t) { S = Object.assign(JSON.parse(JSON.stringify(S_DEF)), b); keep(); home(); done(); return; }
+  if (f.id) CLOUD.load(f.id).then(c => { if (c) { CLOUD.adopt(c, f.id); home(); done(); } }).catch(() => toast('記録を もどせなかった。「ID で ログイン」を ためしてね', 4000));
 }
 function howTo() {
   screen(`${topBar('あそびかた', battleMenu)}
@@ -735,6 +782,7 @@ function quizResult(Q) {
 }
 
 home();
+updateAfter();
 if (S.id) CLOUD.save();
 // テスト用
 window.GL = { get S() { return S; }, get B() { return B; }, save, home, startBattle, E, NET, CLOUD };

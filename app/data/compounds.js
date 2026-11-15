@@ -54,4 +54,5 @@ window.COMPOUNDS = [
   { id: 'u', f: 'U', ja: 'ウラン', p: { U: 1 }, pt: 1, t: 'gem', em: '⚛️', note: '原子力発電の燃料になる金属' },
 ];
 // 山札にふくまれる枚数(合計 約100枚)
-window.DECK_COUNTS = { H: 16, O: 14, C: 8, N: 5, Cl: 6, Na: 5, S: 5, Ca: 4, Fe: 3, Cu: 4, Mg: 3, K: 3, Al: 2, Si: 2, Zn: 2, Ag: 3, Au: 2, He: 2, Ne: 2, Ar: 1, F: 2, I: 1, Ti: 1, Pt: 1, U: 1 };
+// 2026-11-15: よく使う O・H を少し増やし、ほとんど使わない元素を減らした(手札でだぶつくため)
+window.DECK_COUNTS = { H: 18, O: 20, C: 8, N: 5, Cl: 6, Na: 4, S: 5, Ca: 3, Fe: 3, Cu: 3, Mg: 2, K: 2, Al: 2, Si: 1, Zn: 1, Ag: 2, Au: 1, He: 1, Ne: 1, Ar: 1, F: 1, I: 1, Ti: 1, Pt: 1, U: 1 };
